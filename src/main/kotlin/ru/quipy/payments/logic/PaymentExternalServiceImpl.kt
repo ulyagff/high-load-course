@@ -2,15 +2,11 @@ package ru.quipy.payments.logic
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
-import liquibase.pro.packaged.S
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
 import org.slf4j.LoggerFactory
-import ru.quipy.common.utils.LeakingBucketRateLimiter
 import ru.quipy.common.utils.NonBlockingOngoingWindow
-import ru.quipy.common.utils.OngoingWindow
-import ru.quipy.common.utils.SlidingWindowRateLimiter
 import ru.quipy.common.utils.TokenBucketRateLimiter
 import ru.quipy.core.EventSourcingService
 import ru.quipy.payments.api.PaymentAggregate
@@ -40,6 +36,7 @@ class PaymentExternalSystemAdapterImpl(
     private val parallelRequests = properties.parallelRequests
 
     private val client = OkHttpClient.Builder().build()
+    private val ongoingWindow = NonBlockingOngoingWindow(parallelRequests)
     private val rateLimiter = TokenBucketRateLimiter(
         rateLimitPerSec - 1, rateLimitPerSec - 1, 1L, TimeUnit.SECONDS
     )
@@ -63,6 +60,9 @@ class PaymentExternalSystemAdapterImpl(
 
         try {
             while(!rateLimiter.tick()){
+            }
+
+            while (ongoingWindow.putIntoWindow() is NonBlockingOngoingWindow.WindowResponse.Fail) {
             }
             client.newCall(request).execute().use { response ->
                 val body = try {
@@ -97,6 +97,8 @@ class PaymentExternalSystemAdapterImpl(
                     }
                 }
             }
+        } finally {
+            ongoingWindow.releaseWindow()
         }
     }
 
