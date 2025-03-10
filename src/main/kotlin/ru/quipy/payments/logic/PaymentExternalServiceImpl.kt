@@ -62,16 +62,13 @@ class PaymentExternalSystemAdapterImpl(
 
         while (curIteration < RETRY_LIMIT) {
             try {
-                while (!ongoingWindow.tryAcquire()) {
-                    if (now() + requestAverageProcessingTime.toMillis() * 2 >= deadline) {
-                        throw SocketTimeoutException()
-                    }
+
+                while(!ongoingWindow.tryAcquire()) {
+                    if (checkTimeoutException(deadline, transactionId, paymentId)) return
                 }
 
-                while (!rateLimiter.tick()) {
-                    if (now() + requestAverageProcessingTime.toMillis() * 2 >= deadline) {
-                        throw SocketTimeoutException()
-                    }
+                while(!rateLimiter.tick()) {
+                    if (checkTimeoutException(deadline, transactionId, paymentId)) return
                 }
 
                 val request = Request.Builder().run {
@@ -137,6 +134,17 @@ class PaymentExternalSystemAdapterImpl(
                 ongoingWindow.release()
             }
         }
+    }
+
+    private fun checkTimeoutException(deadline: Long, transactionId: UUID?, paymentId: UUID): Boolean {
+        if (now() + requestAverageProcessingTime.toMillis() * 2 >= deadline) {
+            logger.error("[$accountName] Payment timeout for txId: $transactionId, payment: $paymentId")
+            paymentESService.update(paymentId) {
+                it.logProcessing(false, now(), transactionId, reason = "Request timeout.")
+            }
+            return true
+        }
+        return false
     }
 
     override fun price() = properties.price
