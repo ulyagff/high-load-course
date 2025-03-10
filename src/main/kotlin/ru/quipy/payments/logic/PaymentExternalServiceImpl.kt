@@ -8,6 +8,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
 import org.slf4j.LoggerFactory
+import ru.quipy.common.utils.NonBlockingOngoingWindow
 import ru.quipy.common.utils.SlidingWindowRateLimiter
 import ru.quipy.core.EventSourcingService
 import ru.quipy.payments.api.PaymentAggregate
@@ -36,7 +37,7 @@ class PaymentExternalSystemAdapterImpl(
     private val parallelRequests = properties.parallelRequests
 
     private val client = OkHttpClient.Builder().build()
-    private val ongoingWindow = Semaphore(parallelRequests)
+    private val ongoingWindow = NonBlockingOngoingWindow(parallelRequests)
     private val rateLimiter = SlidingWindowRateLimiter(
         rateLimitPerSec.toLong(), Duration.ofSeconds(1L)
     )
@@ -59,8 +60,8 @@ class PaymentExternalSystemAdapterImpl(
         }.build()
 
         try {
-            while(!ongoingWindow.tryAcquire()) {
-                if (now() + requestAverageProcessingTime.toMillis()*2 >= deadline) {
+            while(!(ongoingWindow.putIntoWindow() is NonBlockingOngoingWindow.WindowResponse.Success)) {
+                if (now() + requestAverageProcessingTime.toMillis() >= deadline) {
                     logger.error("[$accountName] Payment timeout for txId: $transactionId, payment: $paymentId")
                     paymentESService.update(paymentId) {
                         it.logProcessing(false, now(), transactionId, reason = "Request timeout.")
@@ -70,7 +71,7 @@ class PaymentExternalSystemAdapterImpl(
             }
 
             while(!rateLimiter.tick()) {
-                if (now() + requestAverageProcessingTime.toMillis()*2 >= deadline) {
+                if (now() + requestAverageProcessingTime.toMillis() >= deadline) {
                     logger.error("[$accountName] Payment timeout for txId: $transactionId, payment: $paymentId")
                     paymentESService.update(paymentId) {
                         it.logProcessing(false, now(), transactionId, reason = "Request timeout.")
@@ -113,7 +114,7 @@ class PaymentExternalSystemAdapterImpl(
                 }
             }
         } finally {
-            ongoingWindow.release()
+            ongoingWindow.releaseWindow()
         }
     }
 
