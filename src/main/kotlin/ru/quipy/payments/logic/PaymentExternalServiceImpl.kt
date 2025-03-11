@@ -60,11 +60,23 @@ class PaymentExternalSystemAdapterImpl(
 
         try {
             while(!ongoingWindow.tryAcquire()) {
-                if (checkTimeoutException(deadline, transactionId, paymentId)) return
+                if (now() + requestAverageProcessingTime.toMillis()*2 >= deadline) {
+                    logger.error("[$accountName] Payment timeout for txId: $transactionId, payment: $paymentId")
+                    paymentESService.update(paymentId) {
+                        it.logProcessing(false, now(), transactionId, reason = "Request timeout.")
+                    }
+                    return
+                }
             }
 
             while(!rateLimiter.tick()) {
-                if (checkTimeoutException(deadline, transactionId, paymentId)) return
+                if (now() + requestAverageProcessingTime.toMillis()*2 >= deadline) {
+                    logger.error("[$accountName] Payment timeout for txId: $transactionId, payment: $paymentId")
+                    paymentESService.update(paymentId) {
+                        it.logProcessing(false, now(), transactionId, reason = "Request timeout.")
+                    }
+                    return
+                }
             }
 
             client.newCall(request).execute().use { response ->
@@ -103,17 +115,6 @@ class PaymentExternalSystemAdapterImpl(
         } finally {
             ongoingWindow.release()
         }
-    }
-
-    private fun checkTimeoutException(deadline: Long, transactionId: UUID?, paymentId: UUID): Boolean {
-        if (now() + requestAverageProcessingTime.toMillis() * 2 >= deadline) {
-            logger.error("[$accountName] Payment timeout for txId: $transactionId, payment: $paymentId")
-            paymentESService.update(paymentId) {
-                it.logProcessing(false, now(), transactionId, reason = "Request timeout.")
-            }
-            return true
-        }
-        return false
     }
 
     override fun price() = properties.price
