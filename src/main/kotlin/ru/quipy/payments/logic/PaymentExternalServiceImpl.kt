@@ -47,6 +47,8 @@ class PaymentExternalSystemAdapterImpl(
     var delay = 1000L
 
     override fun performPaymentAsync(paymentId: UUID, amount: Int, paymentStartedAt: Long, deadline: Long) {
+        var curIteration = 0
+
         logger.warn("[$accountName] Submitting payment request for payment $paymentId")
 
         val transactionId = UUID.randomUUID()
@@ -107,11 +109,11 @@ class PaymentExternalSystemAdapterImpl(
                         }
                     }
 
-                    // curIteration++
-                    // if (curIteration < RETRY_LIMIT) {
-                    // val finalDelay = min(delay, abs(deadline - now()))
-                    // Thread.sleep(finalDelay)
-                    // }
+                    curIteration++
+                    if (curIteration < RETRY_LIMIT) {
+                    val finalDelay = min(delay, abs(deadline - now()))
+                    Thread.sleep(finalDelay)
+                    }
 
                 }
             } catch (e: Exception) {
