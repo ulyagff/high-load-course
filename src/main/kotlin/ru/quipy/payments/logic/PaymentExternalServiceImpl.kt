@@ -30,13 +30,15 @@ class PaymentExternalSystemAdapterImpl(
         val mapper = ObjectMapper().registerKotlinModule()
     }
 
+    val quantile = 1880L
+
     private val serviceName = properties.serviceName
     private val accountName = properties.accountName
     private val requestAverageProcessingTime = properties.averageProcessingTime
     private val rateLimitPerSec = properties.rateLimitPerSec
     private val parallelRequests = properties.parallelRequests
 
-    private val client = OkHttpClient.Builder().callTimeout(Duration.ofMillis(6000L)).build()
+    private val client = OkHttpClient.Builder().callTimeout(Duration.ofMillis(quantile)).build()
     private val ongoingWindow = Semaphore(parallelRequests)
     private val rateLimiter = SlidingWindowRateLimiter(
         rateLimitPerSec.toLong(), Duration.ofSeconds(1L)
@@ -108,8 +110,8 @@ class PaymentExternalSystemAdapterImpl(
 
                     curIteration++
                     if (curIteration < RETRY_LIMIT) {
-                    val finalDelay = min(delay, abs(deadline - now()))
-                    Thread.sleep(finalDelay)
+                        val finalDelay = min(delay, abs(deadline - now()))
+                        Thread.sleep(finalDelay)
                     }
 
                 }
