@@ -30,13 +30,15 @@ class PaymentExternalSystemAdapterImpl(
         val mapper = ObjectMapper().registerKotlinModule()
     }
 
+    val quantile = 1880L
+
     private val serviceName = properties.serviceName
     private val accountName = properties.accountName
     private val requestAverageProcessingTime = properties.averageProcessingTime
     private val rateLimitPerSec = properties.rateLimitPerSec
     private val parallelRequests = properties.parallelRequests
 
-    private val client = OkHttpClient.Builder().callTimeout(Duration.ofMillis(6000L)).build()
+    private val client = OkHttpClient.Builder().callTimeout(Duration.ofMillis(quantile)).build()
     private val ongoingWindow = Semaphore(parallelRequests)
     private val rateLimiter = SlidingWindowRateLimiter(
         rateLimitPerSec.toLong(), Duration.ofSeconds(1L)
@@ -62,18 +64,6 @@ class PaymentExternalSystemAdapterImpl(
 
         while (curIteration < RETRY_LIMIT) {
             try {
-                while (!ongoingWindow.tryAcquire()) {
-                    if (now() + requestAverageProcessingTime.toMillis() * 2 >= deadline) {
-                        throw SocketTimeoutException()
-                    }
-                }
-
-                while (!rateLimiter.tick()) {
-                    if (now() + requestAverageProcessingTime.toMillis() * 2 >= deadline) {
-                        throw SocketTimeoutException()
-                    }
-                }
-
                 val request = Request.Builder().run {
                     url("http://localhost:1234/external/process?serviceName=${serviceName}&accountName=${accountName}&transactionId=$transactionId&paymentId=$paymentId&amount=$amount")
                     post(emptyBody)
@@ -101,6 +91,7 @@ class PaymentExternalSystemAdapterImpl(
                         400, 401, 403, 404, 405 -> {
                             throw RuntimeException("Client error code: ${response.code}")
                         }
+
                         429, 503 -> {
                             val retryAfter = response.headers["Retry-After"]?.toLongOrNull()
                             if (retryAfter != null) {
@@ -111,8 +102,8 @@ class PaymentExternalSystemAdapterImpl(
 
                     curIteration++
                     if (curIteration < RETRY_LIMIT) {
-                    val finalDelay = min(delay, abs(deadline - now()))
-                    Thread.sleep(finalDelay)
+                        val finalDelay = min(delay, abs(deadline - now()))
+                        Thread.sleep(finalDelay)
                     }
 
                 }
@@ -133,8 +124,6 @@ class PaymentExternalSystemAdapterImpl(
                         }
                     }
                 }
-            } finally {
-                ongoingWindow.release()
             }
         }
     }
